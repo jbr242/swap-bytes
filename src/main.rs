@@ -15,6 +15,11 @@ struct ChatBehaviour {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    //Let user select nickname
+    let mut stdin = io::BufReader::new(io::stdin()).lines();
+    println!("Enter your nickname");
+    let nickname = stdin.next_line().await.unwrap().unwrap();
+
     // Build and configure the libp2p swarm
     let mut swarm = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
@@ -44,8 +49,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.behaviour_mut().gossipsub.subscribe(&topic)?; // Subscribe to the chat topic
 
     // Listen on specified TCP and UDP ports
-    swarm.listen_on("/ip4/0.0.0.0/tcp/60489".parse()?)?;
-    swarm.listen_on("/ip4/0.0.0.0/udp/60565/quic-v1".parse()?)?;
+    swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+    swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
 
     let mut stdin = io::BufReader::new(io::stdin()).lines(); // Read lines from standard input
     println!("Enter chat messages one line at a time");
@@ -54,8 +59,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         select! {
             // Handle new input from stdin
             Ok(Some(line)) = stdin.next_line() => {
+                let mut message_with_nickname = nickname.clone();
+                message_with_nickname.push_str(": ");
+                message_with_nickname.push_str(&line);
                 // Publish the message to the chat topic
-                if let Err(err) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), line.as_bytes()) {
+                if let Err(err) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), message_with_nickname.as_bytes()) {
                     println!("Error publishing: {:?}", err);
                 }
             }
