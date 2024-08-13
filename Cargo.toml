@@ -8,5 +8,8 @@ edition = "2021"
 tokio = { version = "1.38.1", features = ["full"] }
 async-trait = "0.1.81"
 futures =  "0.3.30"
+regex = "1.10.6"
+
 # libp2p
-libp2p = { version = "0.53.2", features = ["tokio", "gossipsub", "mdns", "noise", "macros", "tcp", "yamux", "quic"]}
+libp2p = { version = "0.53.2",features = ["tokio", "gossipsub", "noise", "macros", "tcp", "quic", "yamux", "rendezvous", "ping", "identify", "kad", "mdns"]}
+
