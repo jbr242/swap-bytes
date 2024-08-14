@@ -59,6 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     let topic = gossipsub::IdentTopic::new("chat"); // Define the chat topic
     swarm.behaviour_mut().gossipsub.subscribe(&topic)?; // Subscribe to the chat topic
+    swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
 
 
     // Listen on specified TCP and UDP ports
@@ -119,7 +120,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     message,
                 })) => {
                     if let Ok(msg) = std::str::from_utf8(&message.data) {
-                        println!("Received message from {peer_id}: {msg}");
+                        let nickname = swarm.behaviour_mut().kademlia.get_record(kad::RecordKey::new(&peer_id.to_string()));
+                        println!("Received message from {nickname}: {msg}");
                     }
                 }
                 SwarmEvent::Behaviour(ChatBehaviourEvent::Kademlia(kad::Event::OutboundQueryProgressed {result, ..})) => {
@@ -135,7 +137,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     println!("Peer {nickname} is listening on ");
                                 }
                                 Err(_) => {
-                                    println!("Peer what");
+                                    println!("Failed to get nickname from peer");
                                 }
                             }
                         }
