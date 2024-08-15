@@ -1,25 +1,19 @@
+mod utils;
+mod commands;
+mod behaviour;
 use futures::stream::StreamExt;
-use libp2p::bytes::Bytes;
-use regex::Regex;
 use libp2p::{
-    gossipsub, mdns, noise, swarm::NetworkBehaviour, swarm::SwarmEvent, tcp, yamux, 
+    gossipsub, mdns, noise, swarm::SwarmEvent, tcp, yamux, kad, PeerId, 
 };
-use libp2p::kad;
 use libp2p::kad::store::MemoryStore;
 use libp2p::kad::Mode;
 use std::error::Error;
+use libp2p::kad::QueryId;
 use std::time::Duration;
 use std::collections::HashMap;
 use tokio::{io, io::AsyncBufReadExt, select};
 
-/// Defines the behaviour of the chat application, including mDNS and GossipSub protocols.
-#[derive(NetworkBehaviour)]
-struct ChatBehaviour {
-    mdns: mdns::tokio::Behaviour,    // Multicast DNS (mDNS) for peer discovery
-    gossipsub: gossipsub::Behaviour,  // GossipSub for pub/sub messaging
-    kademlia: kad::Behaviour<MemoryStore>
-}
-
+use behaviour::{ChatBehaviour, ChatBehaviourEvent};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     
@@ -56,6 +50,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut stdin = io::BufReader::new(io::stdin()).lines();
     println!("Enter your nickname");
     let nickname = stdin.next_line().await.unwrap().unwrap();
+    let mut has_set_name = false;
+    let mut pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
+    let self_peer_id = swarm.local_peer_id().clone();
+
     
     let topic = gossipsub::IdentTopic::new("chat"); // Define the chat topic
     swarm.behaviour_mut().gossipsub.subscribe(&topic)?; // Subscribe to the chat topic
@@ -75,7 +73,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(Some(line)) = stdin.next_line() =>  {
                 //if line starts with / then it is a command
                 if line.starts_with("/") {
-                    handle_command(line, &mut swarm.behaviour_mut().kademlia)?;
+                    commands::handle_command(line, &mut swarm, self_peer_id)?;
                 } else {
                     // Publish the message to the chat topic
                     if let Err(err) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), line.as_bytes()) {
@@ -96,15 +94,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         // Add discovered peers to GossipSub
                         swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr);
-                        let record = kad::Record {
-                            key: kad::RecordKey::new(&swarm.local_peer_id().to_string()),
-                            value: nickname.as_bytes().to_vec(),
-                            publisher: None,
-                            expires: None,
-                        };
-                        swarm.behaviour_mut().kademlia
-                            .put_record(record, kad::Quorum::One)
-                            .expect("Failed to store record locally.");
+                        //if user has not set nickname
+                        if !has_set_name {
+                            let nickname_record = kad::Record {
+                                key: kad::RecordKey::new(&self_peer_id.to_string()),
+                                value: nickname.as_bytes().to_vec(),
+                                publisher: None,
+                                expires: None,
+                            };
+                            match swarm.behaviour_mut().kademlia.put_record(nickname_record, kad::Quorum::One) {
+                                Ok(_) => {
+                                    // If the record is stored successfully, set hasSetName to true
+                                    has_set_name = true;
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to store record: {:?}", e);
+                                }
+                            }
+                        }
                     }
                 }
                 SwarmEvent::Behaviour(ChatBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
@@ -116,28 +123,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 SwarmEvent::Behaviour(ChatBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                     propagation_source: peer_id,
-                    message_id: id,
-                    message,
+                    message, ..
                 })) => {
-                    if let Ok(msg) = std::str::from_utf8(&message.data) {
-                        let nickname = swarm.behaviour_mut().kademlia.get_record(kad::RecordKey::new(&peer_id.to_string()));
-                        println!("Received message from {nickname}: {msg}");
+                    {
+                        if let Ok(msg) = String::from_utf8(message.data.clone()) {
+                            // Start a query to get the nickname from the DHT
+                            let query_id = swarm.behaviour_mut().kademlia.get_record(kad::RecordKey::new(&peer_id.to_string()));
+                            
+                            // Store the message and the peer ID with the query ID for later use
+                            pending_queries.insert(query_id, (peer_id.clone(), msg));
+                        }
                     }
                 }
-                SwarmEvent::Behaviour(ChatBehaviourEvent::Kademlia(kad::Event::OutboundQueryProgressed {result, ..})) => {
+                SwarmEvent::Behaviour(ChatBehaviourEvent::Kademlia(kad::Event::OutboundQueryProgressed {id, result, ..})) => {
                     match result {
+                        // Get record return result
                         kad::QueryResult::GetRecord(Ok(
                             kad::GetRecordOk::FoundRecord(kad::PeerRecord {
-                                record: kad::Record { key, value, ..},
+                                record: kad::Record { value, ..},
                                 ..
                             })
                         )) => {
-                            match std::str::from_utf8(&value) {
-                                Ok(nickname) => {
-                                    println!("Peer {nickname} is listening on ");
-                                }
-                                Err(_) => {
-                                    println!("Failed to get nickname from peer");
+                            if let Some((peer_id, msg)) = pending_queries.remove(&id) {
+                                match std::str::from_utf8(&value) {
+                                    Ok(nickname) => {
+                                        println!("{nickname}: {msg}");
+                                    }
+                                    Err(_) => {
+                                        println!("Failed to decode nickname for peer {peer_id}, but received: {msg}");
+                                    }
                                 }
                             }
                         }
@@ -162,42 +176,4 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn handle_command(
-    line: String,
-    kademlia: &mut kad::Behaviour<MemoryStore>,
-) -> Result<(), Box<dyn Error>> {
-    let args = split_string(&line);
 
-    let cmd = if let Some(cmd) = args.get(0) {
-        cmd 
-    } else {
-        println!("No command given");
-        return Ok({});
-    };
-
-    match cmd.as_str() {
-        "/nickname" =>{
-            // /nickname Josh "learning rust "ben adams" mystery 100
-            let record = kad::Record {
-                key: kad::RecordKey::new(&args[1]),
-                value: args[1].as_bytes().to_vec(),
-                publisher: None,
-                expires: None,
-            };
-            kademlia
-                .put_record(record, kad::Quorum::One)
-                .expect("Failed to store record locally.");
-        }
-        _=> {
-            println!("Unexpected command");
-        }
-    }
-    Ok({})
-}
-
-fn split_string(input: &str) -> Vec<String> {
-    let re = Regex::new(r#""([^"]*)"|\S+"#).unwrap();
-    re.captures_iter(input)
-        .map(|cap| cap.get(0).unwrap().as_str().to_string())
-        .collect()
-}
