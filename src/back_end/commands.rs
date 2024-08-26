@@ -12,6 +12,7 @@ pub fn handle_command(
     let args = split_string(&line);
     let kademlia = &mut swarm.behaviour_mut().kademlia;
 
+
     let cmd = if let Some(cmd) = args.get(0) {
         cmd 
     } else {
@@ -20,8 +21,21 @@ pub fn handle_command(
     };
 
     match cmd.as_str() {
+        "/help" => {
+            println!("Available commands:");
+            println!("/help - Show this help message");
+            println!("/peers - List all connected peers");
+            println!("/nickname <nickname> - Set your nickname");
+            // println!("/dial <peer_id> - Dial a peer by peer ID");
+        }
+        "/peers" => {
+            let peers = swarm.connected_peers();
+            println!("Connected peers:");
+            for peer in peers {
+                println!("{}", peer);
+            }
+        }
         "/nickname" =>{
-            // /nickname Josh "learning rust "ben adams" mystery 100
             let local_peer_id_record = kad::RecordKey::new(&self_peer_id.to_string());
             let record = kad::Record {
                 key: local_peer_id_record,
@@ -33,6 +47,16 @@ pub fn handle_command(
                 .put_record(record, kad::Quorum::One)
                 .expect("Failed to store record locally.");
         }
+        // dial peerid
+        // "/dial" => {
+        //     if let Some(peer_id) = args.get(1) {
+        //         let peer_id = PeerId::from_str(peer_id)?;
+        //         let addr = kademlia.get_address(&peer_id)?;
+        //         swarm.dial_addr(addr)?;
+        //     } else {
+        //         println!("No peer ID given");
+        //     };
+        // }
         _=> {
             println!("Unexpected command");
         }
