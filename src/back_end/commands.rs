@@ -21,6 +21,20 @@ pub fn handle_command(
     };
 
     match cmd.as_str() {
+        "/help" => {
+            println!("Available commands:");
+            println!("/help - Show this help message");
+            println!("/peers - List all connected peers");
+            println!("/nickname <nickname> - Set your nickname");
+            // println!("/dial <peer_id> - Dial a peer by peer ID");
+        }
+        "/peers" => {
+            let peers = swarm.connected_peers();
+            println!("Connected peers:");
+            for peer in peers {
+                println!("{}", peer);
+            }
+        }
         "/nickname" =>{
             let local_peer_id_record = kad::RecordKey::new(&self_peer_id.to_string());
             let record = kad::Record {
