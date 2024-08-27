@@ -26,6 +26,7 @@ pub fn handle_command(
             println!("/help - Show this help message");
             println!("/peers - List all connected peers");
             println!("/nickname <nickname> - Set your nickname");
+            println!("/id - Show your peer ID");
             // println!("/dial <peer_id> - Dial a peer by peer ID");
         }
         "/peers" => {
@@ -46,6 +47,9 @@ pub fn handle_command(
             kademlia
                 .put_record(record, kad::Quorum::One)
                 .expect("Failed to store record locally.");
+        }
+        "/id" => {
+            println!("Your peer ID is: {}", self_peer_id);
         }
         // dial peerid
         // "/dial" => {
