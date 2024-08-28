@@ -46,8 +46,6 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
         .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))  // Configure idle connection timeout
         .build();
 
-    
-
     //Let user select nickname
     let mut stdin = io::BufReader::new(io::stdin()).lines();
     println!("Enter your nickname");
@@ -55,29 +53,36 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
     let mut has_set_name = false;
     let mut pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
     let self_peer_id = swarm.local_peer_id().clone();
-
     
-    let topic = gossipsub::IdentTopic::new("chat"); // Define the chat topic
-    swarm.behaviour_mut().gossipsub.subscribe(&topic)?; // Subscribe to the chat topic
+    println!("Enter topic to subsribe to, Click enter to use default topic");
+    let topics = stdin.next_line().await.unwrap().unwrap();
+    if topics.is_empty() {
+        let topic = gossipsub::IdentTopic::new("chat".to_string());
+        swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+    } else {
+        let topic = gossipsub::IdentTopic::new(topics);
+        swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+    }
+    
+    
     swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
-
-
     // Listen on specified TCP and UDP ports
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
 
     // Start the event handler
-    let mut stdin = io::BufReader::new(io::stdin()).lines(); // Read lines from standard input
     println!("Enter chat messages one line at a time");
     loop {
         select! {
-            Ok(Some(line)) = stdin.next_line() =>  {
-                //if line starts with / then it is a command
+            Ok(Some(mut line)) = stdin.next_line() =>  {
                 if line.starts_with("/") {
                     commands::handle_command(line, &mut swarm, self_peer_id)?;
                 } else {
+                    let current_topic: Vec<_> = swarm.behaviour_mut().gossipsub.topics().collect();
+                    let topic = gossipsub::IdentTopic::new(current_topic[0].to_string());
+                    line = format!("[{topic}]: {line}");
                     // Publish the message to the chat topic
-                    if let Err(err) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), line.as_bytes()) {
+                    if let Err(err) = swarm.behaviour_mut().gossipsub.publish(topic, line.as_bytes()) {
                         println!("Error publishing: {:?}", err);
                     }
                 }
@@ -128,7 +133,8 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                         if let Ok(msg) = String::from_utf8(message.data.clone()) {
                             // Start a query to get the nickname from the DHT
                             let query_id = swarm.behaviour_mut().kademlia.get_record(kad::RecordKey::new(&peer_id.to_string()));
-                            
+                            //get topic of message
+
                             // Store the message and the peer ID with the query ID for later use
                             pending_queries.insert(query_id, (peer_id.clone(), msg));
                         }

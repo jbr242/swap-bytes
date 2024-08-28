@@ -3,6 +3,7 @@ use crate::behaviour::ChatBehaviour;
 use libp2p::PeerId;
 use libp2p::kad;
 use std::error::Error;
+use libp2p::gossipsub;
 
 pub fn handle_command(
     line: String,
@@ -50,6 +51,23 @@ pub fn handle_command(
         }
         "/id" => {
             println!("Your peer ID is: {}", self_peer_id);
+        }
+        "/join" => {
+            let gossipsub = &mut swarm.behaviour_mut().gossipsub;
+            let current_topics: Vec<_> = gossipsub.topics().collect();
+            //leave original topic first
+            let topic = gossipsub::IdentTopic::new(current_topics[0].to_string());
+            swarm.behaviour_mut().gossipsub.unsubscribe(&topic)?;
+            let topic = gossipsub::IdentTopic::new(args.get(1).expect("No topic given"));
+            swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+            println!("Joined topic: {}", topic);
+        }
+        "/topic" => {
+            let topics = swarm.behaviour_mut().gossipsub.topics();
+            println!("Subscribed topics:");
+            for topic in topics {
+                println!("{}", topic);
+            }
         }
         // dial peerid
         // "/dial" => {
