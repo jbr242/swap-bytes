@@ -1,9 +1,18 @@
 use crate::utils::split_string;
 use crate::behaviour::ChatBehaviour;
+use libp2p::Multiaddr;
 use libp2p::PeerId;
 use libp2p::kad;
+use libp2p::Swarm;
+use std::collections::HashSet;
 use std::error::Error;
 use libp2p::gossipsub;
+
+// pub fn dial_peer(swarm: &mut Swarm<ChatBehaviour>, peer_id: PeerId, address: Multiaddr) -> Result<(), Box<dyn Error>> {
+//     println!("Dialing peer: {} at {}", peer_id, address);
+//     swarm.dial(address.clone())?;
+//     Ok(())
+// }
 
 pub fn handle_command(
     line: String,
@@ -28,7 +37,9 @@ pub fn handle_command(
             println!("/peers - List all connected peers");
             println!("/nickname <nickname> - Set your nickname");
             println!("/id - Show your peer ID");
-            // println!("/dial <peer_id> - Dial a peer by peer ID");
+            println!("/join <topic> - Join a topic");
+            println!("/topic - List currently subscribed topic");
+            println!("/topics - List available topics");
         }
         "/peers" => {
             let peers = swarm.connected_peers();
@@ -64,21 +75,34 @@ pub fn handle_command(
         }
         "/topic" => {
             let topics = swarm.behaviour_mut().gossipsub.topics();
-            println!("Subscribed topics:");
+            println!("Currently subsribed topic:");
             for topic in topics {
                 println!("{}", topic);
             }
         }
-        // dial peerid
-        // "/dial" => {
-        //     if let Some(peer_id) = args.get(1) {
-        //         let peer_id = PeerId::from_str(peer_id)?;
-        //         let addr = kademlia.get_address(&peer_id)?;
-        //         swarm.dial_addr(addr)?;
+        "/topics" => {
+            let allowed_topics: HashSet<&str> = ["chat", "movies", "books", "music"].iter().cloned().collect();
+            println!("Available topics:");
+            for topic in allowed_topics {
+                println!("{}", topic);
+            }
+        }
+        // "/send" => {
+        //     if let (Some(filename), Some(peer_id_str), Some(address_str)) = (args.get(1), args.get(2), args.get(3)) {
+        //         let peer_id = peer_id_str.parse::<PeerId>()?;
+        //         let address = address_str.parse::<Multiaddr>()?;
+
+        //         // Dial the peer to initiate the file transfer
+        //         dial_peer(swarm, peer_id, address)?;
+
+        //         // Implement the file sending logic here, such as using a custom protocol or streams
+        //         println!("Preparing to send file: {} to peer: {}", filename, peer_id);
+        //         // Example: send_file(swarm, peer_id, filename); // Function to handle the actual file transfer
         //     } else {
-        //         println!("No peer ID given");
-        //     };
+        //         println!("Usage: /send <filename> <peer_id> <multiaddr>");
+        //     }
         // }
+
         _=> {
             println!("Unexpected command");
         }
