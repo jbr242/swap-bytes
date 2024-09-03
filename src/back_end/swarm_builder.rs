@@ -1,6 +1,5 @@
 use crate::back_end::commands;
 use crate::back_end::behaviour;
-use crate::back_end::utils;
 
 use futures::StreamExt;
 use libp2p::{
@@ -8,6 +7,7 @@ use libp2p::{
 };
 use libp2p::kad::store::MemoryStore;
 use libp2p::kad::Mode;
+use std::collections::HashSet;
 use std::error::Error;
 use libp2p::kad::QueryId;
 use std::time::Duration;
@@ -54,14 +54,27 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
     let mut pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
     let self_peer_id = swarm.local_peer_id().clone();
     
-    println!("Enter topic to subsribe to, Click enter to use default topic");
-    let topics = stdin.next_line().await.unwrap().unwrap();
-    if topics.is_empty() {
-        let topic = gossipsub::IdentTopic::new("chat".to_string());
+    let allowed_topics: HashSet<&str> = ["chat", "movies", "books", "music"].iter().cloned().collect();
+
+    loop {
+        println!("Enter topic to subscribe to, or press Enter to use the default topic:");
+        println!("Allowed topics: {}", allowed_topics.iter().cloned().collect::<Vec<&str>>().join(", "));
+
+        let input = stdin.next_line().await.unwrap().unwrap();
+        let str_topic = input.trim();
+        // If the user presses Enter without typing anything, use the default topic
+        let topic = if str_topic.is_empty() {
+            gossipsub::IdentTopic::new("chat".to_string())
+        } else if allowed_topics.contains(str_topic) {
+            gossipsub::IdentTopic::new(str_topic.to_string())
+        } else {
+            println!("Topic not allowed. Please choose a valid topic.");
+            continue; 
+        };
+
+        // Subscribe to the selected topic
         swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
-    } else {
-        let topic = gossipsub::IdentTopic::new(topics);
-        swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+        break; // Exit the loop once a valid topic is chosen
     }
     
     
@@ -180,3 +193,6 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
         }
     }
 }
+
+
+
