@@ -34,7 +34,8 @@ pub fn handle_command(
             println!("/join <topic> - Join a topic");
             println!("/topic - List currently subscribed topic");
             println!("/topics - List available topics");
-            println!("/sendfile <peer_id> <filename> - Send a file to a peer");
+            println!("/requestfile <peer_id> <filename> - Request a file from a peer");
+
         }
         "/peers" => {
             let peers = swarm.connected_peers();
@@ -104,6 +105,7 @@ pub fn handle_command(
             file_transfer.send_request(peer_id, request)?;
             println!("Sent file request for {} to {}", filename, peer_id);
         }
+        
 
 
         _=> {
