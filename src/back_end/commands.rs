@@ -1,8 +1,12 @@
 use crate::utils::split_string;
-use crate::behaviour::ChatBehaviour;
+use crate::behaviour::{ChatBehaviour, FileRequest};
 use libp2p::PeerId;
 use libp2p::kad;
+use std::collections::HashSet;
 use std::error::Error;
+use std::str::FromStr;
+use libp2p::gossipsub;
+
 
 pub fn handle_command(
     line: String,
@@ -26,7 +30,11 @@ pub fn handle_command(
             println!("/help - Show this help message");
             println!("/peers - List all connected peers");
             println!("/nickname <nickname> - Set your nickname");
-            // println!("/dial <peer_id> - Dial a peer by peer ID");
+            println!("/id - Show your peer ID");
+            println!("/join <topic> - Join a topic");
+            println!("/topic - List currently subscribed topic");
+            println!("/topics - List available topics");
+            println!("/sendfile <peer_id> <filename> - Send a file to a peer");
         }
         "/peers" => {
             let peers = swarm.connected_peers();
@@ -47,16 +55,57 @@ pub fn handle_command(
                 .put_record(record, kad::Quorum::One)
                 .expect("Failed to store record locally.");
         }
-        // dial peerid
-        // "/dial" => {
-        //     if let Some(peer_id) = args.get(1) {
-        //         let peer_id = PeerId::from_str(peer_id)?;
-        //         let addr = kademlia.get_address(&peer_id)?;
-        //         swarm.dial_addr(addr)?;
-        //     } else {
-        //         println!("No peer ID given");
-        //     };
-        // }
+        "/id" => {
+            println!("Your peer ID is: {}", self_peer_id);
+        }
+        "/join" => {
+            let gossipsub = &mut swarm.behaviour_mut().gossipsub;
+            let current_topics: Vec<_> = gossipsub.topics().collect();
+            //leave original topic first
+            let topic = gossipsub::IdentTopic::new(current_topics[0].to_string());
+            swarm.behaviour_mut().gossipsub.unsubscribe(&topic)?;
+            let topic = gossipsub::IdentTopic::new(args.get(1).expect("No topic given"));
+            swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+            println!("Joined topic: {}", topic);
+        }
+        "/topic" => {
+            let topics = swarm.behaviour_mut().gossipsub.topics();
+            println!("Currently subsribed topic:");
+            for topic in topics {
+                println!("{}", topic);
+            }
+        }
+        "/topics" => {
+            let allowed_topics: HashSet<&str> = ["chat", "movies", "books", "music"].iter().cloned().collect();
+            println!("Available topics:");
+            for topic in allowed_topics {
+                println!("{}", topic);
+            }
+        }
+        "/requestfile" => {
+            //test if filename and peer id are provided
+            if args.len() < 3 {
+                println!("Please provide a peer ID and a filename");
+                return Ok({});
+            }
+            let file_transfer = &mut swarm.behaviour_mut().request_response;
+            let peer_id_str = &args[1];
+
+
+            let peer_id = match PeerId::from_str(peer_id_str) {
+                Ok(pid) => pid,
+                Err(err) => {
+                    eprintln!("Invalid Peer ID '{}': {}", peer_id_str, err);
+                    return Ok(());
+                }
+            };
+            let filename = &args[2];
+            let request = FileRequest(filename.to_string());
+            file_transfer.send_request(peer_id, request)?;
+            println!("Sent file request for {} to {}", filename, peer_id);
+        }
+
+
         _=> {
             println!("Unexpected command");
         }

@@ -1,14 +1,21 @@
+use crate::back_end::behaviour::FileTransferBehaviourEvent;
 use crate::back_end::commands;
 use crate::back_end::behaviour;
-use crate::back_end::utils;
 
 use futures::StreamExt;
+use libp2p::request_response;
+use libp2p::request_response::ProtocolSupport;
+use libp2p::StreamProtocol;
 use libp2p::{
     gossipsub, mdns, noise, swarm::SwarmEvent, tcp, yamux, kad, PeerId, 
 };
 use libp2p::kad::store::MemoryStore;
 use libp2p::kad::Mode;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+use std::collections::HashSet;
 use std::error::Error;
+use std::path::Path;
 use libp2p::kad::QueryId;
 use std::time::Duration;
 use std::collections::HashMap;
@@ -41,12 +48,16 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                     key.public().to_peer_id(),
                     MemoryStore::new(key.public().to_peer_id()),
                 ),
+                request_response: behaviour::FileTransferBehaviour {
+                    request_response: libp2p::request_response::cbor::Behaviour::new(
+                        [(StreamProtocol::new("/file-exchange/1"),
+                        ProtocolSupport::Full,)],
+                        request_response::Config::default(),
+                    )},
             })
         })?
         .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))  // Configure idle connection timeout
         .build();
-
-    
 
     //Let user select nickname
     let mut stdin = io::BufReader::new(io::stdin()).lines();
@@ -55,29 +66,49 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
     let mut has_set_name = false;
     let mut pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
     let self_peer_id = swarm.local_peer_id().clone();
-
     
-    let topic = gossipsub::IdentTopic::new("chat"); // Define the chat topic
-    swarm.behaviour_mut().gossipsub.subscribe(&topic)?; // Subscribe to the chat topic
+    let allowed_topics: HashSet<&str> = ["chat", "movies", "books", "music"].iter().cloned().collect();
+
+    loop {
+        println!("Enter topic to subscribe to, or press Enter to use the default topic:");
+        println!("Allowed topics: {}", allowed_topics.iter().cloned().collect::<Vec<&str>>().join(", "));
+
+        let input = stdin.next_line().await.unwrap().unwrap();
+        let str_topic = input.trim();
+        // If the user presses Enter without typing anything, use the default topic
+        let topic = if str_topic.is_empty() {
+            gossipsub::IdentTopic::new("chat".to_string())
+        } else if allowed_topics.contains(str_topic) {
+            gossipsub::IdentTopic::new(str_topic.to_string())
+        } else {
+            println!("Topic not allowed. Please choose a valid topic.");
+            continue; 
+        };
+
+        // Subscribe to the selected topic
+        swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+        break; // Exit the loop once a valid topic is chosen
+    }
+    
+    
     swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
-
-
     // Listen on specified TCP and UDP ports
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
 
     // Start the event handler
-    let mut stdin = io::BufReader::new(io::stdin()).lines(); // Read lines from standard input
     println!("Enter chat messages one line at a time");
     loop {
         select! {
-            Ok(Some(line)) = stdin.next_line() =>  {
-                //if line starts with / then it is a command
+            Ok(Some(mut line)) = stdin.next_line() =>  {
                 if line.starts_with("/") {
                     commands::handle_command(line, &mut swarm, self_peer_id)?;
                 } else {
+                    let current_topic: Vec<_> = swarm.behaviour_mut().gossipsub.topics().collect();
+                    let topic = gossipsub::IdentTopic::new(current_topic[0].to_string());
+                    line = format!("[{topic}]: {line}");
                     // Publish the message to the chat topic
-                    if let Err(err) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), line.as_bytes()) {
+                    if let Err(err) = swarm.behaviour_mut().gossipsub.publish(topic, line.as_bytes()) {
                         println!("Error publishing: {:?}", err);
                     }
                 }
@@ -128,7 +159,8 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                         if let Ok(msg) = String::from_utf8(message.data.clone()) {
                             // Start a query to get the nickname from the DHT
                             let query_id = swarm.behaviour_mut().kademlia.get_record(kad::RecordKey::new(&peer_id.to_string()));
-                            
+                            //get topic of message
+
                             // Store the message and the peer ID with the query ID for later use
                             pending_queries.insert(query_id, (peer_id.clone(), msg));
                         }
@@ -168,9 +200,72 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                         _ => {}
                     }
                 }
+                SwarmEvent::Behaviour(ChatBehaviourEvent::RequestResponse(file_transfer_event)) => match file_transfer_event {
+
+                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::Message {
+                        message,
+                        ..
+                    }) => match message {
+                        request_response::Message::Request {
+                            request, channel, ..
+                        } => {
+                            // a request has been received
+                            behaviour::FileTransferBehaviour::handle_request(&mut swarm.behaviour_mut().request_response, request, channel).await?;
+                           }
+                        request_response::Message::Response {
+                            response, ..
+                        } => {
+                            let sanitized_name = response.filename.replace(&['/', '\\'][..], "_"); // Replace slashes to prevent directory traversal
+                            let filename = format!("downloads/{}", sanitized_name);
+                        
+                            // Create the downloads directory if it doesn't exist
+                            if let Some(parent) = Path::new(&filename).parent() {
+                                tokio::fs::create_dir_all(parent).await?;
+                            }
+                        
+                            // Create and write to the file
+                            match File::create(&filename).await {
+                                Ok(mut file) => {
+                                    if let Err(e) = file.write_all(&response.data).await {
+                                        eprintln!("Failed to write data to file: {}", e);
+                                    } else {
+                                        println!("File saved to {:?}", filename);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to create file: {}", e);
+                                }
+                            }
+                            //save to downloads
+                            // response has the vector of bytes sent from the file server
+                            // here we just print, but you could save it or do something else with it
+                            println!("response {:?}", response);
+                        }
+                    }, 
+        
+                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::OutboundFailure { peer, request_id, error }) => {
+                        // Handle outbound failure
+                        println!("Failed to send request {:?} to peer {:?}: {:?}", request_id, peer, error);
+                    }, 
+        
+                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::InboundFailure { peer, request_id, error }) => {
+                        // Handle inbound failure
+                        println!("Failed to process request {:?} from peer {:?}: {:?}", request_id, peer, error);
+                    }, 
+        
+                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::ResponseSent { peer, request_id }) => {
+                        // Handle successful response sent
+                        println!("Successfully sent response for request {:?} to peer {:?}", request_id, peer);
+                    }, 
+                
+                },
+        
                 
                 _ => {}
             }
         }
     }
 }
+
+
+

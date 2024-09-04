@@ -9,7 +9,12 @@ tokio = { version = "1.38.1", features = ["full"] }
 async-trait = "0.1.81"
 futures =  "0.3.30"
 regex = "1.10.6"
+clap = { version = "4.5.6", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+
 
 # libp2p
-libp2p = { version = "0.53.2",features = ["tokio", "gossipsub", "noise", "macros", "tcp", "quic", "yamux", "rendezvous", "ping", "identify", "kad", "mdns"]}
+libp2p = { version = "0.53.2",features = ["tokio", "gossipsub", "noise", "macros", "tcp", "quic", "yamux", "rendezvous", "ping", "identify", "kad", "mdns","request-response","cbor"]}
+
 
