@@ -218,46 +218,39 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                             let sanitized_name = response.filename.replace(&['/', '\\'][..], "_"); // Replace slashes to prevent directory traversal
                             let filename = format!("downloads/{}", sanitized_name);
                         
-                            // Create the downloads directory if it doesn't exist
+                            // create the downloads directory if it doesn't exist
                             if let Some(parent) = Path::new(&filename).parent() {
                                 tokio::fs::create_dir_all(parent).await?;
                             }
-                        
-                            // Create and write to the file
-                            match File::create(&filename).await {
-                                Ok(mut file) => {
-                                    if let Err(e) = file.write_all(&response.data).await {
-                                        eprintln!("Failed to write data to file: {}", e);
-                                    } else {
-                                        println!("File saved to {:?}", filename);
+                            //check if responsedata is empy
+                            if !response.data.is_empty() {
+                                match File::create(&filename).await {
+                                    Ok(mut file) => {
+                                        if let Err(e) = file.write_all(&response.data).await {
+                                            eprintln!("Failed to write data to file: {}", e);
+                                        } else {
+                                            println!("File saved to {:?}", filename);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to create file: {}", e);
                                     }
                                 }
-                                Err(e) => {
-                                    eprintln!("Failed to create file: {}", e);
-                                }
                             }
-                            //save to downloads
-                            // response has the vector of bytes sent from the file server
-                            // here we just print, but you could save it or do something else with it
-                            println!("response {:?}", response);
+                            else {
+                                println!("File does not exist");
+                            }                            
                         }
                     }, 
         
-                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::OutboundFailure { peer, request_id, error }) => {
-                        // Handle outbound failure
-                        println!("Failed to send request {:?} to peer {:?}: {:?}", request_id, peer, error);
+                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::OutboundFailure { peer, .. }) => {
+                        println!("Failed to send request to peer {:?}: This usually means incorrect filename, or the user doesnt have the file you requested", peer );
                     }, 
         
-                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::InboundFailure { peer, request_id, error }) => {
-                        // Handle inbound failure
-                        println!("Failed to process request {:?} from peer {:?}: {:?}", request_id, peer, error);
+                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::InboundFailure { peer, error, .. }) => {
+                        println!("Failed to process request from peer {:?}: {:?}", peer, error);
                     }, 
-        
-                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::ResponseSent { peer, request_id }) => {
-                        // Handle successful response sent
-                        println!("Successfully sent response for request {:?} to peer {:?}", request_id, peer);
-                    }, 
-                
+                    _ => {}            
                 },
         
                 

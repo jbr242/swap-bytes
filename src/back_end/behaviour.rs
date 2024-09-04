@@ -1,9 +1,12 @@
+use std::path::Path;
+
 use libp2p::{request_response, PeerId};
 use libp2p::{
     gossipsub, kad, mdns, swarm::NetworkBehaviour,
 };
 use libp2p::kad::store::MemoryStore;
 use serde::{Deserialize, Serialize};
+use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,12 +52,36 @@ impl FileTransferBehaviour {
     }
 
     async fn select_file(&self, filename: String) -> Result<Vec<u8>, std::io::Error> {
+        // if file doesnt exist, return emply vec, therefore can say on reciving end that file doesnt exist
+        // There has got to be a better way, but the only way a request doesnt crash is if the file exists
         let mut file_bytes = Vec::new();
-        //get files from upload folder 
-        let path = std::path::Path::new("uploads").join(filename);
+
+        let path = Path::new("uploads").join(&filename);
         println!("Reading file: {:?}", path);
-        let mut file = tokio::fs::File::open(path).await?;
-        file.read_to_end(&mut file_bytes).await?;
+
+        if !path.exists() {
+            eprintln!("Warning: File does not exist - {:?}", path);
+            return Ok(file_bytes);
+        } else if !path.is_file() {
+            eprintln!("Warning: Path is not a file - {:?}", path);
+            return Ok(file_bytes);
+        }
+
+        // Attempt to open the file
+        let mut file = match File::open(&path).await {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Warning: Error opening file: {:?} - {}", path, e);
+                return Ok(file_bytes);
+            }
+        };
+
+        if let Err(e) = file.read_to_end(&mut file_bytes).await {
+            eprintln!("Warning: Error reading file: {:?} - {}", path, e);
+            return Ok(file_bytes);
+        }
+
+        // Return the file bytes if successful
         Ok(file_bytes)
     }
 
