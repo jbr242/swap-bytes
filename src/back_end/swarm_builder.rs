@@ -1,14 +1,21 @@
+use crate::back_end::behaviour::FileTransferBehaviourEvent;
 use crate::back_end::commands;
 use crate::back_end::behaviour;
 
 use futures::StreamExt;
+use libp2p::request_response;
+use libp2p::request_response::ProtocolSupport;
+use libp2p::StreamProtocol;
 use libp2p::{
     gossipsub, mdns, noise, swarm::SwarmEvent, tcp, yamux, kad, PeerId, 
 };
 use libp2p::kad::store::MemoryStore;
 use libp2p::kad::Mode;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use std::collections::HashSet;
 use std::error::Error;
+use std::path::Path;
 use libp2p::kad::QueryId;
 use std::time::Duration;
 use std::collections::HashMap;
@@ -41,6 +48,12 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                     key.public().to_peer_id(),
                     MemoryStore::new(key.public().to_peer_id()),
                 ),
+                request_response: behaviour::FileTransferBehaviour {
+                    request_response: libp2p::request_response::cbor::Behaviour::new(
+                        [(StreamProtocol::new("/file-exchange/1"),
+                        ProtocolSupport::Full,)],
+                        request_response::Config::default(),
+                    )},
             })
         })?
         .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))  // Configure idle connection timeout
@@ -187,6 +200,66 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                         _ => {}
                     }
                 }
+                SwarmEvent::Behaviour(ChatBehaviourEvent::RequestResponse(file_transfer_event)) => match file_transfer_event {
+
+                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::Message {
+                        message,
+                        ..
+                    }) => match message {
+                        request_response::Message::Request {
+                            request, channel, ..
+                        } => {
+                            // a request has been received
+                            behaviour::FileTransferBehaviour::handle_request(&mut swarm.behaviour_mut().request_response, request, channel).await?;
+                           }
+                        request_response::Message::Response {
+                            response, ..
+                        } => {
+                            let sanitized_name = response.filename.replace(&['/', '\\'][..], "_"); // Replace slashes to prevent directory traversal
+                            let filename = format!("downloads/{}", sanitized_name);
+                        
+                            // Create the downloads directory if it doesn't exist
+                            if let Some(parent) = Path::new(&filename).parent() {
+                                tokio::fs::create_dir_all(parent).await?;
+                            }
+                        
+                            // Create and write to the file
+                            match File::create(&filename).await {
+                                Ok(mut file) => {
+                                    if let Err(e) = file.write_all(&response.data).await {
+                                        eprintln!("Failed to write data to file: {}", e);
+                                    } else {
+                                        println!("File saved to {:?}", filename);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to create file: {}", e);
+                                }
+                            }
+                            //save to downloads
+                            // response has the vector of bytes sent from the file server
+                            // here we just print, but you could save it or do something else with it
+                            println!("response {:?}", response);
+                        }
+                    }, 
+        
+                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::OutboundFailure { peer, request_id, error }) => {
+                        // Handle outbound failure
+                        println!("Failed to send request {:?} to peer {:?}: {:?}", request_id, peer, error);
+                    }, 
+        
+                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::InboundFailure { peer, request_id, error }) => {
+                        // Handle inbound failure
+                        println!("Failed to process request {:?} from peer {:?}: {:?}", request_id, peer, error);
+                    }, 
+        
+                    FileTransferBehaviourEvent::RequestResponse(request_response::Event::ResponseSent { peer, request_id }) => {
+                        // Handle successful response sent
+                        println!("Successfully sent response for request {:?} to peer {:?}", request_id, peer);
+                    }, 
+                
+                },
+        
                 
                 _ => {}
             }

@@ -1,18 +1,12 @@
 use crate::utils::split_string;
-use crate::behaviour::ChatBehaviour;
-use libp2p::Multiaddr;
+use crate::behaviour::{ChatBehaviour, FileRequest};
 use libp2p::PeerId;
 use libp2p::kad;
-use libp2p::Swarm;
 use std::collections::HashSet;
 use std::error::Error;
+use std::str::FromStr;
 use libp2p::gossipsub;
 
-// pub fn dial_peer(swarm: &mut Swarm<ChatBehaviour>, peer_id: PeerId, address: Multiaddr) -> Result<(), Box<dyn Error>> {
-//     println!("Dialing peer: {} at {}", peer_id, address);
-//     swarm.dial(address.clone())?;
-//     Ok(())
-// }
 
 pub fn handle_command(
     line: String,
@@ -40,6 +34,7 @@ pub fn handle_command(
             println!("/join <topic> - Join a topic");
             println!("/topic - List currently subscribed topic");
             println!("/topics - List available topics");
+            println!("/sendfile <peer_id> <filename> - Send a file to a peer");
         }
         "/peers" => {
             let peers = swarm.connected_peers();
@@ -87,21 +82,29 @@ pub fn handle_command(
                 println!("{}", topic);
             }
         }
-        // "/send" => {
-        //     if let (Some(filename), Some(peer_id_str), Some(address_str)) = (args.get(1), args.get(2), args.get(3)) {
-        //         let peer_id = peer_id_str.parse::<PeerId>()?;
-        //         let address = address_str.parse::<Multiaddr>()?;
+        "/requestfile" => {
+            //test if filename and peer id are provided
+            if args.len() < 3 {
+                println!("Please provide a peer ID and a filename");
+                return Ok({});
+            }
+            let file_transfer = &mut swarm.behaviour_mut().request_response;
+            let peer_id_str = &args[1];
 
-        //         // Dial the peer to initiate the file transfer
-        //         dial_peer(swarm, peer_id, address)?;
 
-        //         // Implement the file sending logic here, such as using a custom protocol or streams
-        //         println!("Preparing to send file: {} to peer: {}", filename, peer_id);
-        //         // Example: send_file(swarm, peer_id, filename); // Function to handle the actual file transfer
-        //     } else {
-        //         println!("Usage: /send <filename> <peer_id> <multiaddr>");
-        //     }
-        // }
+            let peer_id = match PeerId::from_str(peer_id_str) {
+                Ok(pid) => pid,
+                Err(err) => {
+                    eprintln!("Invalid Peer ID '{}': {}", peer_id_str, err);
+                    return Ok(());
+                }
+            };
+            let filename = &args[2];
+            let request = FileRequest(filename.to_string());
+            file_transfer.send_request(peer_id, request)?;
+            println!("Sent file request for {} to {}", filename, peer_id);
+        }
+
 
         _=> {
             println!("Unexpected command");
