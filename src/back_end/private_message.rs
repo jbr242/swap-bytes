@@ -25,12 +25,10 @@ impl PrivateMessageBehaviour {
     }
     pub async fn handle_request(
         &mut self,
-        request: PrivateMessage,
         channel: request_response::ResponseChannel<PrivateMessageResponse>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let message = request.clone();
-        println!("{} [Private]: {}",message.sender, message.message);
-        let private_message_response = PrivateMessageResponse("Message received".to_string());
+        
+        let private_message_response = PrivateMessageResponse("Recipient recieved message".to_string());
         self.request_response.send_response(channel, private_message_response).unwrap();
         Ok(())
     }
