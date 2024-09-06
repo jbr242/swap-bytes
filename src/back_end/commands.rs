@@ -1,11 +1,15 @@
 use crate::utils::split_string;
-use crate::behaviour::{ChatBehaviour, FileRequest};
+use crate::behaviour::ChatBehaviour;
 use libp2p::PeerId;
 use libp2p::kad;
 use std::collections::HashSet;
 use std::error::Error;
 use std::str::FromStr;
 use libp2p::gossipsub;
+
+use super::file_transfer::FileRequest;
+use super::private_message::PrivateMessage;
+
 
 
 pub fn handle_command(
@@ -89,7 +93,7 @@ pub fn handle_command(
                 println!("Please provide a peer ID and a filename");
                 return Ok({});
             }
-            let file_transfer = &mut swarm.behaviour_mut().request_response;
+            let file_transfer = &mut swarm.behaviour_mut().file_transfer;
             let peer_id_str = &args[1];
 
 
@@ -105,9 +109,28 @@ pub fn handle_command(
             file_transfer.send_request(peer_id, request)?;
             println!("Sent file request for {} to {}", filename, peer_id);
         }
-        
 
-
+        "/msg" => {
+            let private_message = &mut swarm.behaviour_mut().private_message;
+            let peer_id_str = &args[1];
+            let peer_id = match PeerId::from_str(peer_id_str) {
+                Ok(pid) => pid,
+                Err(err) => {
+                    eprintln!("Invalid Peer ID '{}': {}", peer_id_str, err);
+                    return Ok(());
+                }
+            };
+            let self_peer_id_str = self_peer_id.to_string();
+            let message = args[2..].join(" ");
+            let priv_message = PrivateMessage {
+                sender: self_peer_id_str,
+                message,
+            };
+            match private_message.send_request(peer_id, priv_message) {
+                Ok(_) => println!("Sent private message to {}", peer_id),
+                Err(e) => eprintln!("Failed to send private message to {}: {:?}", peer_id, e),
+            }
+        }
         _=> {
             println!("Unexpected command");
         }
