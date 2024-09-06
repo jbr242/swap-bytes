@@ -39,6 +39,7 @@ pub fn handle_command(
             println!("/topic - List currently subscribed topic");
             println!("/topics - List available topics");
             println!("/requestfile <peer_id> <filename> - Request a file from a peer");
+            println!("/msg <peer_id> <message> - Send a private message to a peer");
 
         }
         "/peers" => {
@@ -130,6 +131,9 @@ pub fn handle_command(
                 Ok(_) => println!("Sent private message to {}", peer_id),
                 Err(e) => eprintln!("Failed to send private message to {}: {:?}", peer_id, e),
             }
+        }
+        "/exit" => {
+            std::process::exit(0);
         }
         _=> {
             println!("Unexpected command");

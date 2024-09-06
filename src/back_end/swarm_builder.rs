@@ -18,7 +18,6 @@ use libp2p::kad::store::MemoryStore;
 use libp2p::kad::Mode;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use std::collections::HashSet;
 use std::error::Error;
 use std::path::Path;
 use std::str::FromStr;
@@ -72,13 +71,16 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
         .build();
 
     //Let user select nickname
+    let self_peer_id = swarm.local_peer_id().clone();
     let mut stdin = io::BufReader::new(io::stdin()).lines();
     println!("Enter your nickname");
-    let nickname = stdin.next_line().await.unwrap().unwrap();
+    let mut nickname = stdin.next_line().await.unwrap().unwrap();
+    if nickname.is_empty() {
+        nickname = self_peer_id.to_string();
+    }
     let mut has_set_name = false;
     let mut chat_pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
     let mut private_chat_pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
-    let self_peer_id = swarm.local_peer_id().clone();
     
 
     loop {
