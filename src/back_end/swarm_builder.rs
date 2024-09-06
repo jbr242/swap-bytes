@@ -20,6 +20,7 @@ use tokio::io::AsyncWriteExt;
 use std::collections::HashSet;
 use std::error::Error;
 use std::path::Path;
+use std::str::FromStr;
 use libp2p::kad::QueryId;
 use std::time::Duration;
 use std::collections::HashMap;
@@ -74,7 +75,8 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
     println!("Enter your nickname");
     let nickname = stdin.next_line().await.unwrap().unwrap();
     let mut has_set_name = false;
-    let mut pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
+    let mut chat_pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
+    let mut private_chat_pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
     let self_peer_id = swarm.local_peer_id().clone();
     
     let allowed_topics: HashSet<&str> = ["chat", "movies", "books", "music"].iter().cloned().collect();
@@ -172,7 +174,7 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                             //get topic of message
 
                             // Store the message and the peer ID with the query ID for later use
-                            pending_queries.insert(query_id, (peer_id.clone(), msg));
+                            chat_pending_queries.insert(query_id, (peer_id.clone(), msg));
                         }
                     }
                 }
@@ -185,10 +187,20 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                                 ..
                             })
                         )) => {
-                            if let Some((peer_id, msg)) = pending_queries.remove(&id) {
+                            if let Some((peer_id, msg)) = chat_pending_queries.remove(&id) {
                                 match std::str::from_utf8(&value) {
                                     Ok(nickname) => {
                                         println!("{nickname} {msg}");
+                                    }
+                                    Err(_) => {
+                                        println!("Failed to decode nickname for peer {peer_id}, but received: {msg}");
+                                    }
+                                }
+                            }
+                            if let Some((peer_id, msg)) = private_chat_pending_queries.remove(&id) {
+                                match std::str::from_utf8(&value) {
+                                    Ok(nickname) => {
+                                        println!("{} [Private]: {}",nickname, msg);
                                     }
                                     Err(_) => {
                                         println!("Failed to decode nickname for peer {peer_id}, but received: {msg}");
@@ -218,7 +230,11 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                         request_response::Message::Request {
                             request, channel, ..
                         } => {
-                            PrivateMessageBehaviour::handle_request(&mut swarm.behaviour_mut().private_message, request, channel).await?;
+                            let peer_id_from_str = PeerId::from_str(&request.sender).unwrap();
+                            let query_id = swarm.behaviour_mut().kademlia.get_record(kad::RecordKey::new(&request.sender));
+                            private_chat_pending_queries.insert(query_id, (peer_id_from_str, request.message.clone()));
+                            
+                            PrivateMessageBehaviour::handle_request(&mut swarm.behaviour_mut().private_message, channel).await?;
                         }
                         request_response::Message::Response {
                             response, ..
