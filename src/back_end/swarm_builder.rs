@@ -4,6 +4,7 @@ use crate::back_end::commands;
 use crate::back_end::behaviour;
 use crate::back_end::private_message::PrivateMessageBehaviour;
 use crate::back_end::private_message::PrivateMessageBehaviourEvent;
+use crate::back_end::utils;
 
 
 use futures::StreamExt;
@@ -17,7 +18,6 @@ use libp2p::kad::store::MemoryStore;
 use libp2p::kad::Mode;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use std::collections::HashSet;
 use std::error::Error;
 use std::path::Path;
 use std::str::FromStr;
@@ -71,26 +71,27 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
         .build();
 
     //Let user select nickname
+    let self_peer_id = swarm.local_peer_id().clone();
     let mut stdin = io::BufReader::new(io::stdin()).lines();
     println!("Enter your nickname");
-    let nickname = stdin.next_line().await.unwrap().unwrap();
+    let mut nickname = stdin.next_line().await.unwrap().unwrap();
+    if nickname.is_empty() {
+        nickname = self_peer_id.to_string();
+    }
     let mut has_set_name = false;
     let mut chat_pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
     let mut private_chat_pending_queries: HashMap<QueryId, (PeerId, String)> = HashMap::new();
-    let self_peer_id = swarm.local_peer_id().clone();
     
-    let allowed_topics: HashSet<&str> = ["chat", "movies", "books", "music"].iter().cloned().collect();
 
     loop {
         println!("Enter topic to subscribe to, or press Enter to use the default topic:");
-        println!("Allowed topics: {}", allowed_topics.iter().cloned().collect::<Vec<&str>>().join(", "));
-
+        utils::print_allowed_topics();
         let input = stdin.next_line().await.unwrap().unwrap();
         let str_topic = input.trim();
         // If the user presses Enter without typing anything, use the default topic
         let topic = if str_topic.is_empty() {
             gossipsub::IdentTopic::new("chat".to_string())
-        } else if allowed_topics.contains(str_topic) {
+        } else if utils::check_topic(str_topic) {
             gossipsub::IdentTopic::new(str_topic.to_string())
         } else {
             println!("Topic not allowed. Please choose a valid topic.");
@@ -173,7 +174,6 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                             let query_id = swarm.behaviour_mut().kademlia.get_record(kad::RecordKey::new(&peer_id.to_string()));
                             //get topic of message
 
-                            // Store the message and the peer ID with the query ID for later use
                             chat_pending_queries.insert(query_id, (peer_id.clone(), msg));
                         }
                     }
@@ -260,7 +260,8 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                         request_response::Message::Response {
                             response, ..
                         } => {
-                            let sanitized_name = response.filename.replace(&['/', '\\'][..], "_"); // Replace slashes to prevent directory traversal
+                            // clean the name to stop attacks, saw this on some examples dont really know what it means
+                            let sanitized_name = response.filename.replace(&['/', '\\'][..], "_"); 
                             let filename = format!("downloads/{}", sanitized_name);
                         
                             // create the downloads directory if it doesn't exist
