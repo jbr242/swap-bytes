@@ -1,6 +1,10 @@
-use crate::back_end::behaviour::FileTransferBehaviourEvent;
+use crate::back_end::file_transfer::FileTransferBehaviourEvent;
+use crate::back_end::file_transfer::FileTransferBehaviour;
 use crate::back_end::commands;
 use crate::back_end::behaviour;
+use crate::back_end::private_message::PrivateMessageBehaviour;
+use crate::back_end::private_message::PrivateMessageBehaviourEvent;
+
 
 use futures::StreamExt;
 use libp2p::request_response;
@@ -48,9 +52,15 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                     key.public().to_peer_id(),
                     MemoryStore::new(key.public().to_peer_id()),
                 ),
-                request_response: behaviour::FileTransferBehaviour {
+                file_transfer: FileTransferBehaviour {
                     request_response: libp2p::request_response::cbor::Behaviour::new(
                         [(StreamProtocol::new("/file-exchange/1"),
+                        ProtocolSupport::Full,)],
+                        request_response::Config::default(),
+                    )},
+                private_message: PrivateMessageBehaviour {
+                    request_response: libp2p::request_response::cbor::Behaviour::new(
+                        [(StreamProtocol::new("/private-message/1"),
                         ProtocolSupport::Full,)],
                         request_response::Config::default(),
                     )},
@@ -178,7 +188,7 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                             if let Some((peer_id, msg)) = pending_queries.remove(&id) {
                                 match std::str::from_utf8(&value) {
                                     Ok(nickname) => {
-                                        println!("{nickname}: {msg}");
+                                        println!("{nickname} {msg}");
                                     }
                                     Err(_) => {
                                         println!("Failed to decode nickname for peer {peer_id}, but received: {msg}");
@@ -200,7 +210,26 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                         _ => {}
                     }
                 }
-                SwarmEvent::Behaviour(ChatBehaviourEvent::RequestResponse(file_transfer_event)) => match file_transfer_event {
+                SwarmEvent::Behaviour(ChatBehaviourEvent::PrivateMessage(private_message_event)) => match private_message_event {
+                    PrivateMessageBehaviourEvent::RequestResponse(request_response::Event::Message {
+                        message,
+                        ..
+                    }) => match message {
+                        request_response::Message::Request {
+                            request, channel, ..
+                        } => {
+                            PrivateMessageBehaviour::handle_request(&mut swarm.behaviour_mut().private_message, request, channel).await?;
+                        }
+                        request_response::Message::Response {
+                            response, ..
+                        } => {
+                            let message = response.0;
+                            println!("{message}");
+                        }
+                    },
+                    _ => {} 
+                } 
+                SwarmEvent::Behaviour(ChatBehaviourEvent::FileTransfer(file_transfer_event)) => match file_transfer_event {
 
                     FileTransferBehaviourEvent::RequestResponse(request_response::Event::Message {
                         message,
@@ -210,7 +239,7 @@ pub async fn start_swarm_builder() -> Result<(), Box<dyn Error>> {
                             request, channel, ..
                         } => {
                             // a request has been received
-                            behaviour::FileTransferBehaviour::handle_request(&mut swarm.behaviour_mut().request_response, request, channel).await?;
+                            FileTransferBehaviour::handle_request(&mut swarm.behaviour_mut().file_transfer, request, channel).await?;
                            }
                         request_response::Message::Response {
                             response, ..
