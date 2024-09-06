@@ -6,7 +6,7 @@ This is a peer-to-peer (P2P) file bartering application built using libp2p. The 
 * File exchange between peers.
 * Peer discovery using mDNS and Kademlia.
 * Encrypted communication with Noise protocol.
-* Supports multiple topics for chat, including private chat rooms.
+* Supports multiple topics for chat, including private messaging.
 ### Getting Started
 #### Prerequisites
 Ensure you have the following installed on your system:
@@ -32,7 +32,7 @@ cargo run
 ```
 #### Enter your nickname:
 
-Upon starting the application, you will be prompted to enter your nickname. This nickname will be used in the chat and stored in the DHT for other peers to discover.
+Upon starting the application, you will be prompted to enter your nickname. This nickname will be used in the chat and stored in the DHT for other peers to discover. If you do not choose a nickname, your peerid will be set as your nickname
 
 #### Select a chat topic:
 
@@ -56,17 +56,19 @@ During the application runtime, you can use the following commands:
 * /topic: Show the currently subscribed topic.
 * /topics: List available topics.
 * /requestfile <peer_id> <file_name> : Request a file from a peer.
+* /msg <peer_id> <message> : Send a private message to a peer
+* /exit : Exit program
 ### Examples
 1. Sending a message:
-* Simply type your message and press Enter to send it to the current chat topic.
+   * Simply type your message and press Enter to send it to the current chat topic.
 2. Joining a new topic:
-
-* Use the command /join <topic> to switch to a new topic (e.g., /join movies).
+  * Use the command /join <topic> to switch to a new topic (e.g., /join movies).
 3. Requesting a file:
-* Use /requestfile <peer_id> <file_name> to request a file from another peer. Make sure the peer ID is valid and the file exists.
+  * Use /requestfile <peer_id> <file_name> to request a file from another peer. Make sure the peer ID is valid and the file exists.
 4. Setting your nickname:
-
-* Use /nickname <new_nickname> to update your nickname in the network.
+  * Use /nickname <new_nickname> to update your nickname in the network.
+5. Sending a private message:
+  * Use /msg <peer_id> <message> to send a private message to a peer, useful for discussion of file trading!
 ### File Handling
 * Uploads: Place files you want to share in the uploads folder. Files not found in this directory cannot be shared.
 * Downloads: Received files are saved in the downloads folder with sanitized filenames to prevent directory traversal attacks.
